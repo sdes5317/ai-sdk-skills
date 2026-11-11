@@ -5,17 +5,39 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 const transport = new DefaultChatTransport({ api: '/api/chat' });
 const toolLabels: Record<string, string> = {
   getCurrentTime: '查詢時間',
-  loadSkill: '載入回答指引',
+  loadSkill: '載入技能指引',
   readSkillFile: '讀取參考資料',
+  bash: '處理檔案',
+  publishFile: '準備下載',
 };
 
+function getDownload(output: unknown, chatId: string): { name: string; url: string } | undefined {
+  if (typeof output !== 'object' || output === null || !('name' in output) || !('url' in output)) return;
+  if (typeof output.name !== 'string' || typeof output.url !== 'string') return;
+  if (!output.url.startsWith(`/api/chats/${chatId}/files/`) || !/^\/api\/chats\/[a-f0-9-]{36}\/files\/[a-f0-9-]{36}$/.test(output.url)) return;
+  return { name: output.name, url: output.url };
+}
+
 export function App() {
-  const { messages, sendMessage, status, error, stop, regenerate, setMessages, clearError } = useChat({ transport });
+  const [chatId, setChatId] = useState(() => crypto.randomUUID());
+  const { messages, sendMessage, status, error, stop, regenerate, setMessages, clearError } = useChat({ id: chatId, transport });
   const [input, setInput] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState('');
   const transcript = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
-  const busy = status === 'submitted' || status === 'streaming';
+  const generating = status === 'submitted' || status === 'streaming';
+  const busy = generating || resetting;
+
+  useEffect(() => {
+    const cleanup = () => {
+      // Page unload cleanup is best effort; the server also expires the session.
+      void fetch(`/api/chats/${chatId}`, { method: 'DELETE', keepalive: true }).catch(() => {});
+    };
+    window.addEventListener('pagehide', cleanup);
+    return () => { window.removeEventListener('pagehide', cleanup); cleanup(); };
+  }, [chatId]);
 
   useEffect(() => {
     if (transcript.current && stickToBottom.current) {
@@ -29,15 +51,28 @@ export function App() {
     if (!text || busy) return;
     stickToBottom.current = true;
     clearError();
+    setResetError('');
     setInput('');
     void sendMessage({ text });
   }
 
-  function clearChat() {
-    setMessages([]);
-    clearError();
-    setInput('');
-    composer.current?.focus();
+  async function clearChat() {
+    if (busy) return;
+    setResetting(true);
+    setResetError('');
+    try {
+      const response = await fetch(`/api/chats/${chatId}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Reset failed');
+      setMessages([]);
+      clearError();
+      setInput('');
+      setChatId(crypto.randomUUID());
+    } catch {
+      setResetError('暫時無法清除對話，請稍後再試。');
+    } finally {
+      setResetting(false);
+      composer.current?.focus();
+    }
   }
 
   return (
@@ -47,8 +82,8 @@ export function App() {
           <p className="eyebrow">LET’S TALK</p>
           <h1>對話助理<span aria-hidden="true">.</span></h1>
         </div>
-        <button className="quiet-button" type="button" onClick={clearChat} disabled={busy || messages.length === 0}>
-          清除對話
+        <button className="quiet-button" type="button" onClick={() => { void clearChat(); }} disabled={busy || messages.length === 0}>
+          {resetting ? '清除中…' : '清除對話'}
         </button>
       </header>
 
@@ -75,10 +110,14 @@ export function App() {
                   if (part.type === 'text') return <div className="message-text" key={index}>{part.text}</div>;
                   if (isToolUIPart(part)) {
                     const failed = part.state === 'output-error' || part.state === 'output-denied';
+                    const download = getToolName(part) === 'publishFile' && part.state === 'output-available' ? getDownload(part.output, chatId) : undefined;
                     return (
-                      <div className={`tool-status${failed ? ' tool-error' : ''}`} key={index}>
-                        <span aria-hidden="true">↳</span> {toolLabels[getToolName(part)] ?? '執行工具'}
-                        <span>{part.state === 'output-available' ? '完成' : failed ? '失敗' : '處理中…'}</span>
+                      <div key={index}>
+                        <div className={`tool-status${failed ? ' tool-error' : ''}`}>
+                          <span aria-hidden="true">↳</span> {toolLabels[getToolName(part)] ?? '執行工具'}
+                          <span>{part.state === 'output-available' ? '完成' : failed ? '失敗' : '處理中…'}</span>
+                        </div>
+                        {download && <a className="download-link" href={download.url} download={download.name}>下載 {download.name} <span aria-hidden="true">↓</span></a>}
                       </div>
                     );
                   }
@@ -87,13 +126,13 @@ export function App() {
               </div>
             </article>
           ))}
-          {busy && <p className="working" role="status">{status === 'submitted' ? '正在思考…' : '正在回覆…'}</p>}
+          {generating && <p className="working" role="status">{status === 'submitted' ? '正在思考…' : '正在回覆…'}</p>}
         </div>
 
-        {error && (
+        {(error || resetError) && (
           <div className="error-banner" role="alert">
-            <span>回覆失敗，請重試；若對話過長，請清除後重新開始。</span>
-            <button className="quiet-button" type="button" onClick={() => { void regenerate(); }} disabled={busy}>重試</button>
+            <span>{resetError || '回覆失敗，請重試；若對話過長，請清除後重新開始。'}</span>
+            {error && !resetError && <button className="quiet-button" type="button" onClick={() => { void regenerate(); }} disabled={busy}>重試</button>}
           </div>
         )}
 
@@ -112,15 +151,15 @@ export function App() {
           />
           <div className="composer-actions">
             <span className="keyboard-hint">Enter 送出 · Shift + Enter 換行</span>
-            {busy ? (
+            {generating ? (
               <button className="send-button" type="button" onClick={() => { void stop(); }}>停止回覆</button>
             ) : (
-              <button className="send-button" type="submit" disabled={!input.trim()}>送出 <span aria-hidden="true">↑</span></button>
+              <button className="send-button" type="submit" disabled={busy || !input.trim()}>送出 <span aria-hidden="true">↑</span></button>
             )}
           </div>
         </form>
       </div>
-      <p className="page-note">對話只保留在此頁，重新整理後即清除。</p>
+      <p className="page-note">對話只保留在此頁；產出檔案請於 10 分鐘內下載，清除對話後即失效。</p>
     </main>
   );
 }
