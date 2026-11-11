@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createChatAgent } from './agent.js';
 import { createApp } from './app.js';
 import { discoverSkills } from './skills.js';
+import { ConversationStore } from './conversations.js';
 
 const env = z.object({
   AI_GATEWAY_API_KEY: z.string().trim().min(1),
@@ -18,8 +19,10 @@ if (!env.success) {
 }
 
 const skills = await discoverSkills();
-const agent = createChatAgent(gateway(env.data.AI_MODEL), skills);
-const server = createApp(agent).listen(env.data.PORT, env.data.HOST, () => {
+const model = gateway(env.data.AI_MODEL);
+const agent = createChatAgent(model, skills);
+const conversations = new ConversationStore(model, skills);
+const server = createApp(agent, conversations).listen(env.data.PORT, env.data.HOST, () => {
   console.log(`API: http://${env.data.HOST}:${env.data.PORT}`);
 });
 server.on('error', () => {
@@ -29,7 +32,8 @@ server.on('error', () => {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    server.close(() => process.exit());
+    const cleanup = conversations.closeAll();
+    server.close(() => { void cleanup.finally(() => process.exit()); });
     setTimeout(() => process.exit(1), 5_000).unref();
   });
 }

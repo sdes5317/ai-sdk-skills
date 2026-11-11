@@ -37,10 +37,21 @@ export async function prepareSandbox(runtime: ExecutionSandbox, skills: readonly
   }
   const setup = await runtime.sandbox.run({ command: `mkdir -p ${sandboxOutputRoot}`, abortSignal: signal });
   if (setup.exitCode !== 0) throw new Error('無法建立 Sandbox 輸出目錄。');
-  return createBashTool({
+  const bash = await createBashTool({
     sandbox: runtime.sandbox,
     workingDirectory: '/workspace',
     timeout: 15_000,
     maxOutputLength: 12_000,
   });
+  return {
+    ...bash,
+    execute: async (input: Parameters<typeof bash.execute>[0], options: Parameters<typeof bash.execute>[1]) => {
+      const deadline = AbortSignal.timeout(15_000);
+      const signal = options.abortSignal ? AbortSignal.any([options.abortSignal, deadline]) : deadline;
+      const result = await bash.execute(input, { ...options, abortSignal: signal });
+      // just-bash 2.x can report exitCode 0 when the final command was cancelled.
+      signal.throwIfAborted();
+      return result;
+    },
+  };
 }

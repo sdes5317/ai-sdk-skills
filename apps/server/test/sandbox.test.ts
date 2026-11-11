@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createJustBashNetworkSandboxSession } from '@ai-sdk/sandbox-just-bash';
 import { collectSkillFiles, discoverSkills } from '../src/skills.js';
-import { prepareSandbox } from '../src/sandbox.js';
+import { createLocalExecutionSandbox, prepareSandbox } from '../src/sandbox.js';
 
 test('官方 Bash 工具能執行巢狀技能腳本，且二進位 assets 完整保留', async t => {
   const root = await mkdtemp(join(tmpdir(), 'sandbox-skills-'));
@@ -45,4 +45,26 @@ test('技能資源封裝拒絕 junction 與過大的二進位檔案', async t =>
   t.after(() => rm(outside, { recursive: true, force: true }));
   await symlink(outside, join(directory, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(collectSkillFiles(skills));
+});
+
+test('本機環境不提供主機檔案、環境變數、網路與任意程式；Bash 可取消', async t => {
+  const previous = process.env.CHAT_SANDBOX_TEST_SECRET;
+  process.env.CHAT_SANDBOX_TEST_SECRET = 'host-only-marker';
+  t.after(() => {
+    if (previous === undefined) delete process.env.CHAT_SANDBOX_TEST_SECRET;
+    else process.env.CHAT_SANDBOX_TEST_SECRET = previous;
+  });
+  const runtime = await createLocalExecutionSandbox(new AbortController().signal);
+  t.after(() => runtime.stop());
+  const bash = await prepareSandbox(runtime, [], new AbortController().signal);
+  const options = { toolCallId: 'test', messages: [], context: {} };
+  const unavailable = await bash.execute({ command: 'node --version; python3 --version; curl https://example.com' }, options);
+  assert.ok('exitCode' in unavailable);
+  assert.notEqual(unavailable.exitCode, 0);
+  assert.doesNotMatch(unavailable.stdout, /Node.js|Python/);
+  assert.equal(await runtime.sandbox.readTextFile({ path: '/host/package.json' }), null);
+  const environment = await bash.execute({ command: 'printenv' }, options);
+  assert.ok('stdout' in environment);
+  assert.doesNotMatch(environment.stdout, /host-only-marker/);
+  await assert.rejects(bash.execute({ command: 'sleep 10' }, { ...options, abortSignal: AbortSignal.timeout(20) }), { name: 'TimeoutError' });
 });
