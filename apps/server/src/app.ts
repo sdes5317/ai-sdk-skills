@@ -45,6 +45,14 @@ export function createApp(agent: ReturnType<typeof createChatAgent>) {
       return;
     }
 
+    // A stopped stream may leave tool inputs without results. Keep only completed calls.
+    const completeMessages = messages.map(message => ({
+      ...message,
+      parts: message.parts.filter(part => !part.type.startsWith('tool-')
+        || (part.state === 'output-available' && part.preliminary !== true)
+        || part.state === 'output-error' || part.state === 'output-denied'),
+    })).filter(message => message.parts.some(part => part.type !== 'step-start'));
+
     const controller = new AbortController();
     res.once('close', () => {
       if (!res.writableEnded) controller.abort();
@@ -53,7 +61,7 @@ export function createApp(agent: ReturnType<typeof createChatAgent>) {
     await pipeAgentUIStreamToResponse({
       response: res,
       agent,
-      uiMessages: messages,
+      uiMessages: completeMessages,
       abortSignal: controller.signal,
       timeout: 60_000,
       sendReasoning: false,

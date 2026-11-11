@@ -101,3 +101,22 @@ test('瀏覽器取消連線會中止模型請求', { timeout: 5_000 }, async t =
   controller.abort();
   await aborted;
 });
+
+test('停止工具後可以繼續對話，未完成的工具不傳給模型', async t => {
+  const model = new MockLanguageModelV4({ doStream: textStream('可以繼續。') });
+  const url = await serve(t, createApp(createChatAgent(model)));
+  const response = await fetch(`${url}/api/chat`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [
+      userMessage,
+      { id: 'assistant-1', role: 'assistant', parts: [
+        { type: 'step-start' },
+        { type: 'tool-getCurrentTime', toolCallId: 'unfinished-tool', state: 'input-available', input: { timeZone: 'UTC' } },
+      ] },
+      { ...userMessage, id: 'user-2', parts: [{ type: 'text', text: '繼續聊天' }] },
+    ] }),
+  });
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /可以繼續/);
+  assert.doesNotMatch(JSON.stringify(model.doStreamCalls[0]?.prompt), /unfinished-tool/);
+});
