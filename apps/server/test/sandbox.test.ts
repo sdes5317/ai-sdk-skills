@@ -68,3 +68,15 @@ test('本機環境不提供主機檔案、環境變數、網路與任意程式�
   assert.doesNotMatch(environment.stdout, /host-only-marker/);
   await assert.rejects(bash.execute({ command: 'sleep 10' }, { ...options, abortSignal: AbortSignal.timeout(20) }), { name: 'TimeoutError' });
 });
+
+test('內附 sales-report 技能可以在本機產生正確的銷售報表', async t => {
+  const runtime = await createLocalExecutionSandbox(new AbortController().signal);
+  t.after(() => runtime.stop());
+  const bash = await prepareSandbox(runtime, await discoverSkills(), new AbortController().signal);
+  const result = await bash.execute({ command: 'bash /workspace/skills/sales-report/scripts/summarize.sh' }, { toolCallId: 'report', messages: [], context: {} });
+  assert.ok('exitCode' in result);
+  assert.equal(result.exitCode, 0);
+  const report = await runtime.sandbox.readTextFile({ path: '/workspace/output/sales-summary.md' });
+  assert.match(report ?? '', /Coffee \| 2 \| 100\.00 \| 200\.00/);
+  assert.match(report ?? '', /總金額：430\.00/);
+});

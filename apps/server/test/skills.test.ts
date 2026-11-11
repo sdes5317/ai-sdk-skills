@@ -11,7 +11,7 @@ import { mockStream, serve, textStream, userMessage } from './helpers.js';
 
 test('技能目錄只放入名稱與用途，模型需要時才載入指示與參考檔', async t => {
   const skills = await discoverSkills();
-  assert.equal(skills.length, 1);
+  assert.ok(skills.some(skill => skill.name === 'clear-answer'));
   assert.match(buildSkillsPrompt(skills), /clear-answer/);
   assert.doesNotMatch(buildSkillsPrompt(skills), /先用一至兩句話/);
   const model = new MockLanguageModelV4({ doStream: [
