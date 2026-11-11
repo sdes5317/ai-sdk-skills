@@ -2,6 +2,7 @@ import { gateway } from 'ai';
 import { z } from 'zod';
 import { createChatAgent } from './agent.js';
 import { createApp } from './app.js';
+import { discoverSkills } from './skills.js';
 
 const env = z.object({
   AI_GATEWAY_API_KEY: z.string().trim().min(1),
@@ -16,7 +17,8 @@ if (!env.success) {
   process.exit(1);
 }
 
-const agent = createChatAgent(gateway(env.data.AI_MODEL));
+const skills = await discoverSkills();
+const agent = createChatAgent(gateway(env.data.AI_MODEL), skills);
 const server = createApp(agent).listen(env.data.PORT, env.data.HOST, () => {
   console.log(`API: http://${env.data.HOST}:${env.data.PORT}`);
 });
