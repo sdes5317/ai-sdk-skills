@@ -18,7 +18,6 @@
   },
   "overrides": {
     "@ai-sdk/tool-bash": { "zod": "4.6.7" },
-    "@vercel/cli-config": { "zod": "4.6.7" },
     "just-bash": { "minimatch": "11.0.1" }
   }
 }

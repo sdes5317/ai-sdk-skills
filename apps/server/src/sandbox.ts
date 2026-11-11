@@ -1,6 +1,5 @@
 import { experimental_createBashTool as createBashTool } from '@ai-sdk/tool-bash';
-import { createVercelSandboxSessionFromNativeSandbox } from '@ai-sdk/sandbox-vercel';
-import { Sandbox } from '@vercel/sandbox';
+import { createJustBashNetworkSandboxSession } from '@ai-sdk/sandbox-just-bash';
 import type { Experimental_SandboxSession } from 'ai';
 import { collectSkillFiles, type Skill } from './skills.js';
 
@@ -9,24 +8,24 @@ export const sandboxOutputRoot = '/workspace/output';
 export type ExecutionSandbox = { sandbox: Experimental_SandboxSession; stop: () => PromiseLike<void> };
 export type SandboxFactory = (signal: AbortSignal) => Promise<ExecutionSandbox>;
 
-export const createVercelExecutionSandbox: SandboxFactory = async signal => {
-  const credentials = process.env.VERCEL_TOKEN ? {
-    token: process.env.VERCEL_TOKEN,
-    teamId: process.env.VERCEL_TEAM_ID ?? '',
-    projectId: process.env.VERCEL_PROJECT_ID ?? '',
-  } : {};
-  const native = await Sandbox.create({
-    ...credentials,
-    image: process.env.SANDBOX_IMAGE || 'vercel/sandbox/universal',
-    persistent: false,
-    timeout: sandboxLifetimeMs,
-    resources: { vcpus: 2 },
-    networkPolicy: 'deny-all',
-    signal,
+export const createLocalExecutionSandbox: SandboxFactory = async signal => {
+  signal.throwIfAborted();
+  const session = await createJustBashNetworkSandboxSession({
+    abortSignal: signal,
+    cwd: '/workspace',
+    env: {},
+    timeoutMs: 15_000,
+    maxCallDepth: 30,
+    maxCommandCount: 2_000,
+    maxLoopIterations: 2_000,
   });
+  if (signal.aborted) {
+    await session.destroy();
+    signal.throwIfAborted();
+  }
   return {
-    sandbox: createVercelSandboxSessionFromNativeSandbox(native),
-    stop: async () => { await native.stop(); },
+    sandbox: session.restricted(),
+    stop: async () => { await session.destroy(); },
   };
 };
 
