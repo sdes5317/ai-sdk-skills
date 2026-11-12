@@ -45,7 +45,7 @@ Skill 描述流程，實際操作由後端工具完成；可執行的腳本語�
 
 ### 1. 套件依賴
 
-依照 [後端 package.json](../apps/server/package.json)：
+本專案使用的套件與版本：
 
 | 套件 | 專案宣告版本 | 負責內容 |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ Skill 描述流程，實際操作由後端工具完成；可執行的腳本語�
 
 ### 2. 建立 sandbox：三種接法
 
-**本機 just-bash**：本專案的 [sandbox.ts](../apps/server/src/sandbox.ts)。
+**本機 just-bash**（本專案使用）。[官方範例](https://ai-sdk.dev/docs/ai-sdk-core/tools#usage)
 
 ```ts
 import { createJustBashNetworkSandboxSession } from '@ai-sdk/sandbox-just-bash';
@@ -130,11 +130,11 @@ const bash = await createBashTool({
 { "command": "bash /workspace/skills/sales-report/scripts/summarize.sh" }
 ```
 
-完整的 `prepareSandbox` 另包裝 `execute`，合併取消訊號與命令期限，執行後檢查 `signal.throwIfAborted()`，避免將取消誤判為成功。程式見 [sandbox.ts](../apps/server/src/sandbox.ts)。
+完整的 `prepareSandbox` 另包裝 `execute`，合併取消訊號與命令期限，執行後檢查 `signal.throwIfAborted()`，避免將取消誤判為成功。
 
 ### 4. 用自訂工具載入 Skill 與參考文字
 
-以下節錄 [skills.ts](../apps/server/src/skills.ts) 的 `createSkillTools` 內部。`read(name, path)` 是本專案的讀檔函式，會檢查技能名稱、真實路徑與 64 KiB 大小限制；`sandboxSkillsRoot` 為 `/workspace/skills`。
+以下節錄本專案的 `createSkillTools`。`read(name, path)` 會檢查技能名稱、真實路徑與 64 KiB 大小限制；`sandboxSkillsRoot` 為 `/workspace/skills`。
 
 ```ts
 import { posix } from 'node:path';
@@ -166,7 +166,7 @@ const skillTools = {
 
 ### 5. 把指示與工具接進 ToolLoopAgent
 
-以下簡化 [agent.ts](../apps/server/src/agent.ts)，保留 Skills 與 Bash 的接點：
+以下保留 Skills 與 Bash 的接點。[官方 Agent 組合範例](https://ai-sdk.dev/cookbook/guides/agent-skills#step-5-create-the-agent)
 
 ```ts
 import { isStepCount, ToolLoopAgent } from 'ai';
@@ -188,7 +188,7 @@ const agent = new ToolLoopAgent({
 
 `instructions` 提供技能清單與環境說明，`tools` 提供可呼叫操作。每一步模型提出工具呼叫後，`ToolLoopAgent` 執行 `execute`，將結果帶入下一次模型呼叫；例如 `loadSkill → readSkillFile → bash → 回答`。`isStepCount(6)` 限制最多 6 個模型步驟，`toolCallConcurrency: 1` 讓工具依序執行。[官方 ToolLoopAgent 說明](https://ai-sdk.dev/docs/reference/ai-sdk-core/tool-loop-agent)
 
-HTTP 入口在 [app.ts](../apps/server/src/app.ts) 透過 `pipeAgentUIStreamToResponse` 啟動 Agent 的串流執行，將對話與取消訊號傳入。[官方串流 API](https://ai-sdk.dev/docs/reference/ai-sdk-core/pipe-agent-ui-stream-to-response)
+HTTP 入口透過 `pipeAgentUIStreamToResponse` 啟動 Agent 的串流執行，將對話與取消訊號傳入。[官方串流 API](https://ai-sdk.dev/docs/reference/ai-sdk-core/pipe-agent-ui-stream-to-response)
 
 ```ts
 import { pipeAgentUIStreamToResponse } from 'ai';
@@ -202,4 +202,4 @@ await pipeAgentUIStreamToResponse({
 });
 ```
 
-實際專案由 [conversations.ts](../apps/server/src/conversations.ts) 為每個對話建立 sandbox，再將綁定該環境的 `bash` 與產物工具傳給 `createChatAgent`。同一對話沿用檔案，清除、到期或關閉時透過 `runtime.stop()` 呼叫 `session.destroy()`。
+本專案為每個對話建立 sandbox，再將綁定該環境的 `bash` 與產物工具傳給 `createChatAgent`。同一對話沿用檔案，清除、到期或關閉時透過 `runtime.stop()` 呼叫 `session.destroy()`。
