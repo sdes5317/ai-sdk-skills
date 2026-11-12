@@ -81,6 +81,32 @@ const sandbox: Experimental_SandboxSession = session.restricted();
 
 just-bash 在同一個 Node.js 程序內模擬 Bash 與記憶體檔案系統，沒有容器層級隔離。本專案使用 `bash`、`cat`、`awk`、`jq` 等內建命令，沒有掛載主機目錄，也未啟用網路、Python 或 Node.js 執行能力；不需要 Docker 或雲端 sandbox 帳號。[just-bash 官方說明](https://justbash.dev/)
 
+#### 抽換切面：共用介面，不同執行環境
+
+AI SDK 以 `Experimental_SandboxSession` 作為共用介面，由 adapter 提供具體實作；`createBashTool({ sandbox })` 只依賴這個介面。官方 Bash 指南提供 just-bash、Vercel 的接法，也允許自訂實作。[官方抽象與 adapter 說明](https://ai-sdk.dev/docs/ai-sdk-core/tools#bash-tool)
+
+| 執行環境 | 接法與依賴 | 主要差異 |
+| --- | --- | --- |
+| 本機 just-bash（本專案） | `@ai-sdk/sandbox-just-bash` | 同程序、記憶體檔案系統；本專案只啟用內建 shell 命令 |
+| Docker | 自行銜接 session 介面，依賴 Docker Engine 與容器 image | 程式在容器內執行，可用語言與套件由 image 決定 |
+| Vercel Sandbox | `@ai-sdk/sandbox-vercel`；原生 SDK 為 `@vercel/sandbox`，需 Vercel 認證 | 雲端 Firecracker microVM；執行環境與資源由雲端管理 |
+
+Vercel 的隔離與認證方式見 [Sandbox 官方文件](https://vercel.com/docs/sandbox)。Docker 在此列為自訂 adapter 的方向；若使用 Vercel 的 **eve**，其 `DefaultSandbox` 已提供 Vercel／Docker／just-bash 的環境選擇機制，本專案目前直接使用 AI SDK 的 session 介面。[eve 官方說明](https://vercel.com/academy/building-agents-with-eve/deploy-agent-to-vercel)
+
+本專案將替換點收在 [sandbox.ts](../apps/server/src/sandbox.ts) 的 `SandboxFactory`。以下簡化 [ConversationStore](../apps/server/src/conversations.ts) 的接法；`createSandbox` 由建構式注入，預設為 `createLocalExecutionSandbox`：
+
+```ts
+type SandboxFactory = (signal: AbortSignal) => Promise<{
+  sandbox: Experimental_SandboxSession;
+  stop: () => PromiseLike<void>;
+}>;
+
+const runtime = await createSandbox(signal); // 抽換此 factory
+const bash = await prepareSandbox(runtime, skills, signal);
+```
+
+替換 factory 後，技能資源載入、Bash 工具與 Agent 的串接可以沿用；仍需依新環境調整可用命令、工作路徑、網路、檔案保存與回收方式，並同步更新 Agent 的環境指示。
+
 ### 3. 複製技能資源，再建立 Bash 工具
 
 ```ts
